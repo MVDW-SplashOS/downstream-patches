@@ -1,0 +1,454 @@
+diff --git a/config-top.h b/config-top.h
+index c47ab01b..540e61c7 100644
+--- a/config-top.h
++++ b/config-top.h
+@@ -118,6 +118,12 @@
+    default ("command_not_found_handle"), change it here. */
+ /* #define NOTFOUND_HOOK "command_not_found_handle" */
+ 
++/* Define FLATPAK_SUPPORT if you want bash to automatically try to execute
++   commands that look like Flatpak application IDs (e.g., com.google.Chrome)
++   using `flatpak run`. This feature is enabled by default when configured
++   with --enable-flatpak-support. */
++/* #define FLATPAK_SUPPORT */
++
+ /* Define if you want each line saved to the history list in bashhist.c:
+    bash_add_history() to be sent to syslog(). */
+ /* #define SYSLOG_HISTORY */
+diff --git a/config.h.in b/config.h.in
+index 1367eaaa..1cd85ffc 100644
+--- a/config.h.in
++++ b/config.h.in
+@@ -150,10 +150,15 @@
+    characters, even if the OS supports them. */
+ #undef NO_MULTIBYTE_SUPPORT
+ 
+-/* Define DEBUGGER if you want to compile in some features used only by the 
++/* Define DEBUGGER if you want to compile in some features used only by the
+    bash debugger. */
+ #undef DEBUGGER
+ 
++/* Define FLATPAK_SUPPORT if you want bash to automatically try to execute
++   commands that look like Flatpak application IDs (e.g., com.google.Chrome)
++   using `flatpak run`. */
++#undef FLATPAK_SUPPORT
++
+ /* Define STRICT_POSIX if you want bash to be strictly posix.2 conformant by
+    default (except for echo; that is controlled separately). */
+ #undef STRICT_POSIX
+@@ -1232,7 +1237,7 @@
+ #undef HAVE_LOCALE_NULL
+ #undef HAVE_NAMELESS_LOCALES
+ #undef HAVE_PER_THREAD_LOCALE
+-#undef HAVE_SOLARIS114_LOCALES 
++#undef HAVE_SOLARIS114_LOCALES
+ 
+ /* Compiler characteristics */
+ #undef FLEXIBLE_ARRAY_MEMBER
+@@ -1279,8 +1284,8 @@
+ #undef HAVE_XLOCALE_H
+ 
+ /* Declarations */
+-#undef HAVE_DECL_FEOF_UNLOCKED 
+-#undef HAVE_DECL_FGETS_UNLOCKED 
++#undef HAVE_DECL_FEOF_UNLOCKED
++#undef HAVE_DECL_FGETS_UNLOCKED
+ #undef HAVE_DECL__SNPRINTF
+ #undef HAVE_DECL__SNWPRINTF
+ 
+@@ -1327,12 +1332,12 @@
+ #undef HAVE_POSIX_PRINTF
+ 
+ #undef HAVE_PTHREAD_API
+-#undef HAVE_PTHREAD_MUTEX_RECURSIVE 
++#undef HAVE_PTHREAD_MUTEX_RECURSIVE
+ #undef HAVE_PTHREAD_RWLOCK
+-#undef HAVE_PTHREAD_RWLOCK_RDLOCK_PREFER_WRITER 
++#undef HAVE_PTHREAD_RWLOCK_RDLOCK_PREFER_WRITER
+ 
+-#undef HAVE_SNPRINTF_RETVAL_C99 
+-#undef HAVE_SNPRINTF_TRUNCATION_C99 
++#undef HAVE_SNPRINTF_RETVAL_C99
++#undef HAVE_SNPRINTF_TRUNCATION_C99
+ 
+ /* Define if you have the `stpcpy' function. */
+ #undef HAVE_STPCPY
+diff --git a/configure b/configure
+index a28a3fcf..d790c62e 100755
+--- a/configure
++++ b/configure
+@@ -872,6 +872,7 @@ enable_disabled_builtins
+ enable_dparen_arithmetic
+ enable_extended_glob
+ enable_extended_glob_default
++enable_flatpak_support
+ enable_function_import
+ enable_glob_asciiranges_default
+ enable_help_builtin
+@@ -1582,6 +1583,9 @@ Optional Features:
+   --enable-extended-glob-default
+                           force extended pattern matching to be enabled by
+                           default
++  --enable-flatpak-support
++                          enable automatic execution of Flatpak application
++                          IDs
+   --enable-function-import
+                           allow bash to import exported function definitions
+                           by default
+@@ -3449,6 +3453,7 @@ opt_coproc=yes
+ opt_arith_for_command=yes
+ opt_net_redirs=yes
+ opt_progcomp=yes
++opt_flatpak_support=yes
+ opt_separate_help=no
+ opt_multibyte=yes
+ opt_debugger=yes
+@@ -3483,7 +3488,7 @@ if test $opt_minimal_config = yes; then
+ 	opt_select=no opt_help=no opt_array_variables=no opt_dparen_arith=no
+ 	opt_brace_expansion=no opt_disabled_builtins=no opt_command_timing=no
+ 	opt_extended_glob=no opt_cond_command=no opt_arith_for_command=no
+-	opt_net_redirs=no opt_progcomp=no opt_separate_help=no
++	opt_net_redirs=no opt_progcomp=no opt_flatpak_support=no opt_separate_help=no
+ 	opt_multibyte=yes opt_cond_regexp=no opt_coproc=no
+ 	opt_casemod_attrs=no opt_casemod_expansions=no opt_extglob_default=no
+ 	opt_translatable_strings=no
+@@ -3617,6 +3622,12 @@ then :
+   enableval=$enable_extended_glob_default; opt_extglob_default=$enableval
+ fi
+ 
++# Check whether --enable-flatpak-support was given.
++if test ${enable_flatpak_support+y}
++then :
++  enableval=$enable_flatpak_support; opt_flatpak_support=$enableval
++fi
++
+ # Check whether --enable-function-import was given.
+ if test ${enable_function_import+y}
+ then :
+@@ -3848,6 +3859,10 @@ fi
+ if test $opt_progcomp = yes; then
+ printf "%s\n" "#define PROGRAMMABLE_COMPLETION 1" >>confdefs.h
+ 
++fi
++if test "$opt_flatpak_support" = yes; then
++printf "%s\n" "#define FLATPAK_SUPPORT 1" >>confdefs.h
++
+ fi
+ if test $opt_multibyte = no; then
+ printf "%s\n" "#define NO_MULTIBYTE_SUPPORT 1" >>confdefs.h
+@@ -9357,8 +9372,8 @@ rm -f core conftest.err conftest.$ac_objext conftest.beam \
+         LIBS=$save_LIBS
+         test $gl_pthread_api = yes && break
+       done
+-      echo "$as_me:9360: gl_pthread_api=$gl_pthread_api" >&5
+-      echo "$as_me:9361: LIBPTHREAD=$LIBPTHREAD" >&5
++      echo "$as_me:9375: gl_pthread_api=$gl_pthread_api" >&5
++      echo "$as_me:9376: LIBPTHREAD=$LIBPTHREAD" >&5
+ 
+       gl_pthread_in_glibc=no
+       # On Linux with glibc >= 2.34, libc contains the fully functional
+@@ -9384,7 +9399,7 @@ rm -rf conftest*
+ 
+           ;;
+       esac
+-      echo "$as_me:9387: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
++      echo "$as_me:9402: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
+ 
+       # Test for libpthread by looking for pthread_kill. (Not pthread_self,
+       # since it is defined as a macro on OSF/1.)
+@@ -9562,7 +9577,7 @@ fi
+ 
+         fi
+       fi
+-      echo "$as_me:9565: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
++      echo "$as_me:9580: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
+     fi
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether POSIX threads API is available" >&5
+ printf %s "checking whether POSIX threads API is available... " >&6; }
+@@ -9809,8 +9824,8 @@ rm -f core conftest.err conftest.$ac_objext conftest.beam \
+         LIBS=$save_LIBS
+         test $gl_pthread_api = yes && break
+       done
+-      echo "$as_me:9812: gl_pthread_api=$gl_pthread_api" >&5
+-      echo "$as_me:9813: LIBPTHREAD=$LIBPTHREAD" >&5
++      echo "$as_me:9827: gl_pthread_api=$gl_pthread_api" >&5
++      echo "$as_me:9828: LIBPTHREAD=$LIBPTHREAD" >&5
+ 
+       gl_pthread_in_glibc=no
+       # On Linux with glibc >= 2.34, libc contains the fully functional
+@@ -9836,7 +9851,7 @@ rm -rf conftest*
+ 
+           ;;
+       esac
+-      echo "$as_me:9839: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
++      echo "$as_me:9854: gl_pthread_in_glibc=$gl_pthread_in_glibc" >&5
+ 
+       # Test for libpthread by looking for pthread_kill. (Not pthread_self,
+       # since it is defined as a macro on OSF/1.)
+@@ -10014,7 +10029,7 @@ fi
+ 
+         fi
+       fi
+-      echo "$as_me:10017: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
++      echo "$as_me:10032: LIBPMULTITHREAD=$LIBPMULTITHREAD" >&5
+     fi
+     { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking whether POSIX threads API is available" >&5
+ printf %s "checking whether POSIX threads API is available... " >&6; }
+diff --git a/configure.ac b/configure.ac
+index 5a76267e..74a0d917 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -130,7 +130,7 @@ else
+ 	MALLOC_LIB=
+ 	MALLOC_LIBRARY=
+ 	MALLOC_LDFLAGS=
+-	MALLOC_DEP=	
++	MALLOC_DEP=
+ fi
+ 
+ if test "$opt_afs" = yes; then
+@@ -173,6 +173,7 @@ opt_coproc=yes
+ opt_arith_for_command=yes
+ opt_net_redirs=yes
+ opt_progcomp=yes
++opt_flatpak_support=yes
+ opt_separate_help=no
+ opt_multibyte=yes
+ opt_debugger=yes
+@@ -207,7 +208,7 @@ if test $opt_minimal_config = yes; then
+ 	opt_select=no opt_help=no opt_array_variables=no opt_dparen_arith=no
+ 	opt_brace_expansion=no opt_disabled_builtins=no opt_command_timing=no
+ 	opt_extended_glob=no opt_cond_command=no opt_arith_for_command=no
+-	opt_net_redirs=no opt_progcomp=no opt_separate_help=no
++	opt_net_redirs=no opt_progcomp=no opt_flatpak_support=no opt_separate_help=no
+ 	opt_multibyte=yes opt_cond_regexp=no opt_coproc=no
+ 	opt_casemod_attrs=no opt_casemod_expansions=no opt_extglob_default=no
+ 	opt_translatable_strings=no
+@@ -236,6 +237,7 @@ AC_ARG_ENABLE(disabled-builtins, AS_HELP_STRING([--enable-disabled-builtins], [a
+ AC_ARG_ENABLE(dparen-arithmetic, AS_HELP_STRING([--enable-dparen-arithmetic], [include ((...)) command]), opt_dparen_arith=$enableval)
+ AC_ARG_ENABLE(extended-glob, AS_HELP_STRING([--enable-extended-glob], [include ksh-style extended pattern matching]), opt_extended_glob=$enableval)
+ AC_ARG_ENABLE(extended-glob-default, AS_HELP_STRING([--enable-extended-glob-default], [force extended pattern matching to be enabled by default]), opt_extglob_default=$enableval)
++AC_ARG_ENABLE(flatpak-support, AS_HELP_STRING([--enable-flatpak-support], [enable automatic execution of Flatpak application IDs]), opt_flatpak_support=$enableval)
+ AC_ARG_ENABLE(function-import, AS_HELP_STRING([--enable-function-import], [allow bash to import exported function definitions by default]), opt_function_import=$enableval)
+ AC_ARG_ENABLE(glob-asciiranges-default, AS_HELP_STRING([--enable-glob-asciiranges-default], [force bracket range expressions in pattern matching to use the C locale by default]), opt_globascii_default=$enableval)
+ AC_ARG_ENABLE(help-builtin, AS_HELP_STRING([--enable-help-builtin], [include the help builtin]), opt_help=$enableval)
+@@ -341,6 +343,9 @@ fi
+ if test $opt_progcomp = yes; then
+ AC_DEFINE(PROGRAMMABLE_COMPLETION)
+ fi
++if test "$opt_flatpak_support" = yes; then
++AC_DEFINE(FLATPAK_SUPPORT)
++fi
+ if test $opt_multibyte = no; then
+ AC_DEFINE(NO_MULTIBYTE_SUPPORT)
+ fi
+@@ -524,7 +529,7 @@ if test "$opt_static_link" = yes; then
+ 	prefer_shared=no
+ 	# if we're using gcc, add `-static' to LDFLAGS, except on Solaris >= 2
+ 	if test "$GCC" = "yes"; then
+-		STATIC_LD="-static" 
++		STATIC_LD="-static"
+ 		case "$host_os" in
+ 		solaris2*)	;;
+ 		linux*)		test "$opt_profiling" = "no" && LDFLAGS="$LDFLAGS -static" ;;
+@@ -589,7 +594,7 @@ then
+ 
+ 	case "$ac_cv_rl_version" in
+ 	8*|9*)	;;
+-	*)	opt_with_installed_readline=no 
++	*)	opt_with_installed_readline=no
+ 		AC_MSG_WARN([installed readline library is too old to be linked with bash])
+ 		AC_MSG_WARN([using private bash version])
+ 		;;
+diff --git a/configure~ b/configure~
+index f71ebc5d..a28a3fcf 100755
+--- a/configure~
++++ b/configure~
+@@ -1,7 +1,7 @@
+ #! /bin/sh
+ # From configure.ac for Bash 5.3, version 5.080.
+ # Guess values for system-dependent variables and create Makefiles.
+-# Generated by GNU Autoconf 2.72 for bash 5.3-rc2.
++# Generated by GNU Autoconf 2.72 for bash 5.3-release.
+ #
+ # Report bugs to <bug-bash@gnu.org>.
+ #
+@@ -605,8 +605,8 @@ MAKEFLAGS=
+ # Identity of this package.
+ PACKAGE_NAME='bash'
+ PACKAGE_TARNAME='bash'
+-PACKAGE_VERSION='5.3-rc2'
+-PACKAGE_STRING='bash 5.3-rc2'
++PACKAGE_VERSION='5.3-release'
++PACKAGE_STRING='bash 5.3-release'
+ PACKAGE_BUGREPORT='bug-bash@gnu.org'
+ PACKAGE_URL=''
+ 
+@@ -1468,7 +1468,7 @@ if test "$ac_init_help" = "long"; then
+   # Omit some internal or obsolete options to make the list less imposing.
+   # This message is too long to be a string in the A/UX 3.1 sh.
+   cat <<_ACEOF
+-'configure' configures bash 5.3-rc2 to adapt to many kinds of systems.
++'configure' configures bash 5.3-release to adapt to many kinds of systems.
+ 
+ Usage: $0 [OPTION]... [VAR=VALUE]...
+ 
+@@ -1534,7 +1534,7 @@ fi
+ 
+ if test -n "$ac_init_help"; then
+   case $ac_init_help in
+-     short | recursive ) echo "Configuration of bash 5.3-rc2:";;
++     short | recursive ) echo "Configuration of bash 5.3-release:";;
+    esac
+   cat <<\_ACEOF
+ 
+@@ -1742,7 +1742,7 @@ fi
+ test -n "$ac_init_help" && exit $ac_status
+ if $ac_init_version; then
+   cat <<\_ACEOF
+-bash configure 5.3-rc2
++bash configure 5.3-release
+ generated by GNU Autoconf 2.72
+ 
+ Copyright (C) 2023 Free Software Foundation, Inc.
+@@ -2420,7 +2420,7 @@ cat >config.log <<_ACEOF
+ This file contains any messages produced by compilers while
+ running configure, to aid debugging if configure makes a mistake.
+ 
+-It was created by bash $as_me 5.3-rc2, which was
++It was created by bash $as_me 5.3-release, which was
+ generated by GNU Autoconf 2.72.  Invocation command line was
+ 
+   $ $0$ac_configure_args_raw
+@@ -3219,7 +3219,7 @@ ac_config_headers="$ac_config_headers config.h buildconf.h"
+ 
+ 
+ BASHVERS=5.3
+-RELSTATUS=rc2
++RELSTATUS=release
+ 
+ case "$RELSTATUS" in
+ alp*|bet*|dev*|rc*|releng*|maint*)	DEBUG='-DDEBUG' MALLOC_DEBUG='-DMALLOC_DEBUG' ;;
+@@ -23814,7 +23814,7 @@ cat >>$CONFIG_STATUS <<\_ACEOF || ac_write_fail=1
+ # report actual input values of CONFIG_FILES etc. instead of their
+ # values after options handling.
+ ac_log="
+-This file was extended by bash $as_me 5.3-rc2, which was
++This file was extended by bash $as_me 5.3-release, which was
+ generated by GNU Autoconf 2.72.  Invocation command line was
+ 
+   CONFIG_FILES    = $CONFIG_FILES
+@@ -23882,7 +23882,7 @@ ac_cs_config_escaped=`printf "%s\n" "$ac_cs_config" | sed "s/^ //; s/'/'\\\\\\\\
+ cat >>$CONFIG_STATUS <<_ACEOF || ac_write_fail=1
+ ac_cs_config='$ac_cs_config_escaped'
+ ac_cs_version="\\
+-bash config.status 5.3-rc2
++bash config.status 5.3-release
+ configured by $0, generated by GNU Autoconf 2.72,
+   with options \\"\$ac_cs_config\\"
+ 
+diff --git a/execute_cmd.c b/execute_cmd.c
+index 070f5119..e8b70f89 100644
+--- a/execute_cmd.c
++++ b/execute_cmd.c
+@@ -5767,6 +5767,77 @@ init_notfound_str (void)
+ #  define NOTFOUND_HOOK "command_not_found_handle"
+ #endif
+ 
++#ifdef FLATPAK_SUPPORT
++/* Check if a command looks like a Flatpak application ID */
++static int
++looks_like_flatpak_app_id (const char *cmd)
++{
++  const char *p;
++  int dot_count = 0;
++  
++  if (cmd == 0 || *cmd == 0)
++    return 0;
++    
++  /* Flatpak app IDs shouldn't contain slashes */
++  if (strchr(cmd, '/') != 0)
++    return 0;
++    
++  /* Check if it starts or ends with a dot */
++  if (*cmd == '.' || cmd[strlen(cmd) - 1] == '.')
++    return 0;
++    
++  /* Check if it contains at least one dot */
++  for (p = cmd; *p; p++)
++    {
++      if (*p == '.')
++        dot_count++;
++    }
++    
++  /* Require at least 1 dot for a valid-looking Flatpak app ID */
++  return (dot_count >= 1);
++}
++
++/* Check if flatpak command is available */
++static int
++flatpak_command_available (void)
++{
++  char *cmd;
++  int available;
++  
++  cmd = search_for_command ("flatpak", 0);
++  available = cmd != 0;
++  free (cmd);
++  
++  return available;
++}
++
++/* Try to execute a command as a Flatpak application */
++static int
++try_execute_flatpak_app (const char *app_id, WORD_LIST *words, int async)
++{
++  WORD_LIST *wl;
++  char *flatpak_cmd;
++  int result;
++  
++  /* Check if flatpak command is available */
++  if (flatpak_command_available () == 0)
++    return -1;
++  
++  /* Build the command: flatpak run app_id [args...] */
++  wl = make_word_list(make_word("flatpak"), 
++                      make_word_list(make_word("run"),
++                      make_word_list(make_word((char *)app_id), words)));
++  
++  /* Execute the flatpak command */
++  flatpak_cmd = savestring("flatpak");
++  result = execute_disk_command(wl, (REDIRECT *)NULL, flatpak_cmd, 
++                                0, 0, async, (struct fd_bitmap *)NULL, 0);
++  free(flatpak_cmd);
++  
++  return result;
++}
++#endif /* FLATPAK_SUPPORT */
++
+ static int
+ execute_disk_command (WORD_LIST *words, REDIRECT *redirects, char *command_line,
+ 		      int pipe_in, int pipe_out, int async,
+@@ -5902,6 +5973,22 @@ execute_disk_command (WORD_LIST *words, REDIRECT *redirects, char *command_line,
+ 
+       if (command == 0)
+ 	{
++#ifdef FLATPAK_SUPPORT
++	  /* Check if this looks like a Flatpak application ID */
++	  if (looks_like_flatpak_app_id (pathname))
++	    {
++	      /* Try to execute as Flatpak application */
++	      without_job_control ();
++#if defined (JOB_CONTROL)
++	      set_sigchld_handler ();
++#endif
++	      result = try_execute_flatpak_app (pathname, words, async);
++	      if (result != -1)
++		exit (result);
++	      /* If flatpak command is not available, fall through to normal handling */
++	    }
++#endif /* FLATPAK_SUPPORT */
++	  
+ 	  hookf = find_function (NOTFOUND_HOOK);
+ 	  if (hookf == 0)
+ 	    {
