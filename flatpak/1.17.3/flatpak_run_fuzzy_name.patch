@@ -1,0 +1,103 @@
+diff --git a/app/flatpak-builtins-run.c b/app/flatpak-builtins-run.c
+index 9b80cb25..36c86d22 100644
+--- a/app/flatpak-builtins-run.c
++++ b/app/flatpak-builtins-run.c
+@@ -36,6 +36,7 @@
+ #include "flatpak-error.h"
+ #include "flatpak-dbus-generated.h"
+ #include "flatpak-run-private.h"
++#include "flatpak-tty-utils-private.h"
+ 
+ static char *opt_arch;
+ static char *opt_branch;
+@@ -113,6 +114,9 @@ flatpak_builtin_run (int argc, char **argv, GCancellable *cancellable, GError **
+   g_autoptr(GError) local_error = NULL;
+   g_autoptr(GPtrArray) dirs = NULL;
+   FlatpakRunFlags flags = 0;
++  g_autoptr(GHashTable) unique_app_ids = NULL;
++  int match_count = 0;
++  g_autofree char *matched_app_id = NULL;
+ 
+   run_environ = g_get_environ ();
+ 
+@@ -163,6 +167,80 @@ flatpak_builtin_run (int argc, char **argv, GCancellable *cancellable, GError **
+   g_assert (rest_argv_start > 0);
+   pref = argv[rest_argv_start];
+ 
++  /* Try to resolve a short app name to a full app ID if fuzzy matching is allowed */
++  if (flatpak_allow_fuzzy_matching (pref))
++    {
++      unique_app_ids = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
++      match_count = 0;
++      matched_app_id = NULL;
++
++      for (i = 0; i < dirs->len; i++)
++        {
++          FlatpakDir *dir = g_ptr_array_index (dirs, i);
++          g_autoptr(GPtrArray) refs = NULL;
++          g_autoptr(GError) find_error = NULL;
++
++          refs = flatpak_dir_find_installed_refs (dir, pref, NULL, NULL,
++                                                  FLATPAK_KINDS_APP,
++                                                  FIND_MATCHING_REFS_FLAGS_FUZZY,
++                                                  &find_error);
++          if (refs == NULL)
++            {
++              /* Ignore errors, just continue */
++              continue;
++            }
++
++          for (int j = 0; j < refs->len; j++)
++            {
++              FlatpakDecomposed *ref = g_ptr_array_index (refs, j);
++              gsize ref_id_len;
++              const char *ref_id_str = flatpak_decomposed_peek_id (ref, &ref_id_len);
++
++              /* Check if the last component of the app ID matches the given pref (case-insensitive) */
++              const char *last_dot = NULL;
++              for (const char *p = ref_id_str; p < ref_id_str + ref_id_len; p++)
++                if (*p == '.')
++                  last_dot = p;
++              
++              const char *last_component = last_dot ? last_dot + 1 : ref_id_str;
++              gsize last_component_len = ref_id_len - (last_component - ref_id_str);
++              
++              if (last_component_len == strlen (pref) &&
++                  g_ascii_strncasecmp (last_component, pref, last_component_len) == 0)
++                {
++                  if (!g_hash_table_contains (unique_app_ids, ref_id_str))
++                    {
++                      g_hash_table_add (unique_app_ids, g_strdup (ref_id_str));
++                      match_count++;
++                      if (matched_app_id == NULL)
++                        matched_app_id = g_strdup (ref_id_str);
++                    }
++                }
++            }
++        }
++
++      /* If exactly one app ID matches the suffix, use that */
++      if (match_count == 1 && matched_app_id != NULL)
++        {
++          /* Replace pref with the full app ID */
++          pref = matched_app_id;
++        }
++      else if (match_count == 0)
++        {
++          /* No matches found with fuzzy matching */
++          flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
++                              _("Application '%s' not found"), argv[rest_argv_start]);
++          return FALSE;
++        }
++      else /* match_count > 1 */
++        {
++          /* Multiple matches found with fuzzy matching */
++          flatpak_fail_error (error, FLATPAK_ERROR_NOT_INSTALLED,
++                              _("Multiple applications match '%s'"), argv[rest_argv_start]);
++          return FALSE;
++        }
++    }
++
+   if (!flatpak_split_partial_ref_arg (pref, FLATPAK_KINDS_APP | FLATPAK_KINDS_RUNTIME,
+                                       opt_arch, opt_branch,
+                                       &kinds, &id, &arch, &branch, error))
